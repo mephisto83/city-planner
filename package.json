@@ -1,0 +1,38 @@
+{
+  "name": "city-planner",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "watch": "npx tsc -w",
+    "run": "node ./dist/index.js",
+    "build": "npx tsc && node pack-up.js",
+    "push": "npm run build && npm publish . --access public",
+    "test": "mocha -r ts-node/register tests/**/*.test.ts",
+    "coverage": "nyc -r lcov -e .ts -x \"*.test.ts\" npm run test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mephisto83/city-planner.git"
+  },
+  "author": "andrew porter <mephisto8335@gmail.com>",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/mephisto83/city-planner/issues"
+  },
+  "homepage": "https://github.com/mephisto83/city-planner#readme",
+  "devDependencies": {
+    "@types/chai": "^4.2.14",
+    "@types/mocha": "^8.2.0",
+    "@types/node": "^14.14.13",
+    "chai": "^4.2.0",
+    "mocha": "^8.2.1",
+    "nyc": "^15.1.0",
+    "ts-node": "^9.1.1",
+    "typescript": "^4.1.3"
+  },
+  "dependencies": {
+    "@mephistowa/point-in-poly": "^1.0.6",
+    "@mephistowa/voronoi": "^1.0.6"
+  }
+}
