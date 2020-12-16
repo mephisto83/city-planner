@@ -8,6 +8,10 @@ import ShelfPack, { Bin } from './shelfpack';
 import Voronoi from '@mephistowa/voronoi/dist/voronoi';
 import { Sites } from '@mephistowa/voronoi/dist/sites';
 import Diagram from '@mephistowa/voronoi/dist/diagram';
+import Cell from '@mephistowa/voronoi/dist/cell';
+import Edge from '@mephistowa/voronoi/dist/edge';
+import HalfEdge from '@mephistowa/voronoi/dist/halfedge';
+import Vertex from '@mephistowa/voronoi/dist/vertex';
 const cliProgress = require('cli-progress');
 const _colors = require('colors');
 const CHILD_LESS = 'CHILD_LESS';
@@ -72,7 +76,7 @@ export default class CityPlanner {
     }
     getSectionLevelBin(arg0: { x: number, y: number, id: string | number, length: number; width: number; }): CityPlan[] {
         let { length, width } = arg0;
-        var sprite = new ShelfPack(width, length, { autoResize: true });
+        var sprite = new ShelfPack(width, length, { autoResize: false });
         let distributions = this.getSectionDistribution(`${arg0.id}`);
         // Pack bins one at a time..
         let bins: CityPlan[] = [];
@@ -82,9 +86,17 @@ export default class CityPlanner {
             b1 = this._progresBar.create(dist.length, 0);
         }
         dist.forEach((key: string, index: number) => {
-            let sw = Math.ceil(Math.sqrt(distributions[key]) * width);
-            let sl = Math.ceil(Math.sqrt(distributions[key]) * length);
+            let sw = 0;
+            let sl = 0;
+            if (dist.length % 2) {
+                sw = distributions[key] * width;
+                sl = arg0.length;
+            }
+            else {
 
+                sl = distributions[key] * length;
+                sw = arg0.width;
+            }
             // packOne() accepts parameters: `width`, `height`, `id`
             // and returns a single allocated Bin object..
             // `id` is optional - if you skip it, shelf-pack will make up a number for you..
@@ -94,7 +106,11 @@ export default class CityPlanner {
             if (bin) {
                 bins.push({
                     ...bin,
-                    inner: this.getLocalSectionLevelBin({ ...arg0, id: key, width: bin.w, length: bin.h })
+                    inner: this.getLocalSectionLevelBin({
+                        ...arg0,
+                        x: bin.x + arg0.x,
+                        y: bin.y + arg0.y, id: key, width: bin.w, length: bin.h
+                    })
                 })
             }
             if (b1)
@@ -142,7 +158,48 @@ export default class CityPlanner {
         let id = GUID();
         var diagram = voronoi.compute(sites, bbox);
         if (this.veronoiPlan && this.veronoiPlan.voronois) {
+            diagram.cells?.forEach((cell: Cell) => {
+                let halfEdges: HalfEdge[] = [];
+                let edgesLeft = [...cell.halfedges.map((v: HalfEdge, index: number) => {
+                    (v as any).id = index;
+                    return v;
+                })];
+                while (edgesLeft.length) {
+                    if (halfEdges.length) {
+                        let lastEdge = halfEdges[halfEdges.length - 1];
+                        let nextEdge: HalfEdge | undefined = edgesLeft.find((e: HalfEdge) => {
+                            let startPoint: Vertex = e.getStartpoint();
+                            let lastEndPoint: Vertex = lastEdge.getEndpoint();
+
+                            return lastEndPoint.x === startPoint.x &&
+                                lastEndPoint.y === startPoint.y;
+                        });
+
+                        if (nextEdge) {
+                            let nextEdgeId = (nextEdge as any).id;
+                            edgesLeft = edgesLeft.filter((v: any) => v.id !== nextEdgeId)
+                            halfEdges.push(nextEdge);
+                        }
+                        else {
+                            throw new Error('no next edge found')
+                        }
+                    }
+                    else {
+                        let first = edgesLeft.pop()
+                        if (first) {
+                            halfEdges.push(first);
+                        }
+                    }
+                    cell.halfedges.forEach((halfEdge: HalfEdge) => {
+                        (halfEdge as any).startPoint = halfEdge.getStartpoint();
+                        (halfEdge as any).endPoint = halfEdge.getEndpoint();
+
+                    });
+                }
+                (cell as any).sortedHalfEdges = halfEdges;
+            });
             this.veronoiPlan.voronois[id] = { id, diagram };
+
             this.veronoiPlan.nodes = this.veronoiPlan.nodes || {};
             sections.forEach((section: { id: string, count: number }, index: number) => {
                 if (this.root) {
@@ -151,7 +208,11 @@ export default class CityPlanner {
                         if (this.veronoiPlan) {
                             this.veronoiPlan.nodes[sectionInfo.id] = {
                                 voronoi: id,
-                                sectionInfo
+                                sectionInfo,
+                                relative: {
+                                    x: bin.x,
+                                    y: bin.y
+                                }
                             }
                         }
                     }
@@ -184,7 +245,7 @@ export default class CityPlanner {
     }
     getLocalSectionLevelBin(arg0: { x: number, y: number, id: string | number, length: number; width: number; }): CityPlan[] {
         let { length, width } = arg0;
-        var sprite = new ShelfPack(width, length, { autoResize: true });
+        var sprite = new ShelfPack(width, length, { autoResize: false });
         let sectionsWithOutChildren = this.getChildrenWithoutChildren(`${arg0.id}`);
 
         let distributions = this.getLocalSectionDistribution(`${arg0.id}`, sectionsWithOutChildren);
@@ -197,8 +258,17 @@ export default class CityPlanner {
         }
 
         dist.forEach((key: string, index: number) => {
-            let sw = Math.ceil(Math.sqrt(distributions[key]) * width);
-            let sl = Math.ceil(Math.sqrt(distributions[key]) * length);
+            let sw = 0;
+            let sl = 0;
+            if (dist.length % 2) {
+                sw = distributions[key] * width;
+                sl = arg0.length;
+            }
+            else {
+
+                sl = distributions[key] * length;
+                sw = arg0.width;
+            }
 
             // packOne() accepts parameters: `width`, `height`, `id`
             // and returns a single allocated Bin object..
@@ -223,8 +293,13 @@ export default class CityPlanner {
                     bins.push({
                         ...bin,
                         x: bin.x + arg0.x,
-                        y: bin.x + arg0.y,
-                        inner: this.getLocalSectionLevelBin({ ...arg0, id: key, width: bin.w, length: bin.h })
+                        y: bin.y + arg0.y,
+                        inner: this.getLocalSectionLevelBin({
+                            ...arg0,
+                            x: bin.x + arg0.x,
+                            y: bin.y + arg0.y,
+                            id: key, width: bin.w, length: bin.h
+                        })
                     })
                 }
             }
@@ -352,7 +427,7 @@ export default class CityPlanner {
     }
     getCityLevelBin({ width, length }: { width: number, length: number }): Bin[] {
         let res: Bin[] = [];
-        var sprite = new ShelfPack(width, length, { autoResize: true });
+        var sprite = new ShelfPack(width, length, { autoResize: false });
         let distributions = this.getSectionLevelDistribution();
         // Pack bins one at a time..
         let bin: Bin | null = null;
