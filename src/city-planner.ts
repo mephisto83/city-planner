@@ -27,7 +27,14 @@ export interface CityPlannerOptions {
     tile_y: number,
 }
 export interface VoronoiPlan {
-    voronois: { [key: string]: { id: string, diagram: Diagram } },
+    voronois: {
+        [key: string]: {
+            id: string, diagram: Diagram,
+            width?: number,
+            height?: number,
+            relative?: { x: number, y: number }
+        }
+    },
     nodes: { [key: string]: {} }
 }
 
@@ -72,6 +79,17 @@ export default class CityPlanner {
             b1.increment({ filename: bin.id });
         });
         multibar.stop();
+        var sprite = new ShelfPack(width, length, { autoResize: true });
+        Object.keys(this.veronoiPlan.voronois).forEach((id: string) => {
+            let v = this.veronoiPlan?.voronois[id];
+            if (v && v.height && v.width) {
+                let bin = sprite.packOne(v.width, v.height);
+                if (bin && this.veronoiPlan) {
+                    this.veronoiPlan.voronois[id].relative = { x: bin.x, y: bin.y };
+                }
+            }
+        })
+
         return this.veronoiPlan;
     }
     getSectionLevelBin(arg0: { x: number, y: number, id: string | number, length: number; width: number; }): CityPlan[] {
@@ -129,17 +147,19 @@ export default class CityPlanner {
     createVoronoi(sections: { id: string, count: number }[], bin: Bin): any {
         let voronoi = new Voronoi();
         var bbox = { xl: 0, xr: bin.w, yt: 0, yb: bin.h }; // xl is x-left, xr is x-right, yt is y-top, and yb is y-bottom
-        let { width, height } = this.getRequiredSites(sections.length);
+        let width = Math.ceil(Math.sqrt(sections.length));
+        let height = width;
 
         var sites: any = [];
         let width_step = bin.w / width;
         let height_step = bin.h / height;
         let sectionindex: number = 0;
+        let magfac = 6;
         for (let w = 0; w < width; w++) {
             for (let h = 0; h < height; h++) {
                 let site: any = {
-                    x: (w * width_step) + (width_step / 2),
-                    y: (h * height_step) + (height_step / 2),
+                    x: (w * width_step) + ((Math.random() * (width_step / magfac)) - (width_step / (magfac * 2))) + (width_step / 2),
+                    y: (h * height_step) + ((Math.random() * (height_step / magfac)) - (height_step / (magfac * 2))) + (height_step / 2),
                     voronoiId: (w - 1) * width + h,
                     w,
                     h
@@ -157,6 +177,9 @@ export default class CityPlanner {
 
         let id = GUID();
         var diagram = voronoi.compute(sites, bbox);
+        if (diagram.cells && sections.length > diagram.cells?.length) {
+            throw new Error('not enough cells')
+        }
         if (this.veronoiPlan && this.veronoiPlan.voronois) {
             diagram.cells?.forEach((cell: Cell) => {
                 let halfEdges: HalfEdge[] = [];
@@ -170,9 +193,7 @@ export default class CityPlanner {
                         let nextEdge: HalfEdge | undefined = edgesLeft.find((e: HalfEdge) => {
                             let startPoint: Vertex = e.getStartpoint();
                             let lastEndPoint: Vertex = lastEdge.getEndpoint();
-
-                            return lastEndPoint.x === startPoint.x &&
-                                lastEndPoint.y === startPoint.y;
+                            return Math.sqrt(Math.pow(lastEndPoint.x - startPoint.x, 2) + Math.pow(lastEndPoint.y - startPoint.y, 2)) < .001;
                         });
 
                         if (nextEdge) {
@@ -198,7 +219,12 @@ export default class CityPlanner {
                 }
                 (cell as any).sortedHalfEdges = halfEdges;
             });
-            this.veronoiPlan.voronois[id] = { id, diagram };
+            this.veronoiPlan.voronois[id] = {
+                id,
+                diagram,
+                width: bin.w,
+                height: bin.h
+            };
 
             this.veronoiPlan.nodes = this.veronoiPlan.nodes || {};
             sections.forEach((section: { id: string, count: number }, index: number) => {
@@ -223,7 +249,9 @@ export default class CityPlanner {
             diagram,
             relative: {
                 x: bin.x,
-                y: bin.y
+                y: bin.y,
+                width: bin.w,
+                height: bin.h
             }
         };
     }
@@ -245,8 +273,9 @@ export default class CityPlanner {
     }
     getLocalSectionLevelBin(arg0: { x: number, y: number, id: string | number, length: number; width: number; }): CityPlan[] {
         let { length, width } = arg0;
-        var sprite = new ShelfPack(width, length, { autoResize: false });
-        let sectionsWithOutChildren = this.getChildrenWithoutChildren(`${arg0.id}`);
+        var sprite = new ShelfPack(width, length, { autoResize: true });
+
+        let sectionsWithOutChildren = this.getAllChildren(`${arg0.id}`);
 
         let distributions = this.getLocalSectionDistribution(`${arg0.id}`, sectionsWithOutChildren);
         // Pack bins one at a time..
@@ -257,56 +286,50 @@ export default class CityPlanner {
             b1 = this._progresBar.create(dist.length, 0);
         }
 
-        dist.forEach((key: string, index: number) => {
-            let sw = 0;
-            let sl = 0;
-            if (dist.length % 2) {
-                sw = distributions[key] * width;
-                sl = arg0.length;
-            }
-            else {
+        // dist.forEach((key: string, index: number) => {
+        let sw = 0;
+        let sl = 0;
 
-                sl = distributions[key] * length;
-                sw = arg0.width;
-            }
+        sl = 1 * length;
+        sw = 1 * width;
 
-            // packOne() accepts parameters: `width`, `height`, `id`
-            // and returns a single allocated Bin object..
-            // `id` is optional - if you skip it, shelf-pack will make up a number for you..
-            // (Protip: numeric ids are much faster than string ids)
+        // packOne() accepts parameters: `width`, `height`, `id`
+        // and returns a single allocated Bin object..
+        // `id` is optional - if you skip it, shelf-pack will make up a number for you..
+        // (Protip: numeric ids are much faster than string ids)
 
-            let bin = sprite.packOne(sw, sl, key);
-            if (bin) {
-                if (key === CHILD_LESS) {
-                    bins.push({
-                        ...bin,
-                        x: bin.x + arg0.x,
-                        y: bin.y + arg0.y,
-                        voronoi: this.createVoronoi(sectionsWithOutChildren, {
-                            ...bin,
-                            x: bin.x + arg0.x,
-                            y: bin.y + arg0.y,
-                        })
-                    })
-                }
-                else {
-                    bins.push({
-                        ...bin,
-                        x: bin.x + arg0.x,
-                        y: bin.y + arg0.y,
-                        inner: this.getLocalSectionLevelBin({
-                            ...arg0,
-                            x: bin.x + arg0.x,
-                            y: bin.y + arg0.y,
-                            id: key, width: bin.w, length: bin.h
-                        })
-                    })
-                }
-            }
-            if (b1) {
-                b1.increment({ filename: key });
-            }
-        });
+        let bin = sprite.packOne(sw, sl);
+        if (bin) {
+            // if (distributions.length < 5000) {
+            bins.push({
+                ...bin,
+                x: bin.x + arg0.x,
+                y: bin.y + arg0.y,
+                voronoi: this.createVoronoi(sectionsWithOutChildren, {
+                    ...bin,
+                    x: bin.x + arg0.x,
+                    y: bin.y + arg0.y,
+                })
+            })
+            // }
+            // else {
+            //     bins.push({
+            //         ...bin,
+            //         x: bin.x + arg0.x,
+            //         y: bin.y + arg0.y,
+            //         inner: this.getLocalSectionLevelBin({
+            //             ...arg0,
+            //             x: bin.x + arg0.x,
+            //             y: bin.y + arg0.y,
+            //             id: key, width: bin.w, length: bin.h
+            //         })
+            //     })
+            // }
+        }
+        if (b1) {
+            b1.increment({ filename: arg0.id });
+        }
+        // });
         if (this._progresBar) {
             this._progresBar.remove(b1);
         }
@@ -569,6 +592,24 @@ export default class CityPlanner {
         });
 
         return count;
+    }
+
+    getAllChildren(parent: string): SectionInfo[] {
+        let result: SectionInfo[] = [];
+
+        if (this.root) {
+            Object.keys(this.root.sectioned).map((it: string) => {
+                let value: SectionInfo | undefined = this.root?.sectioned[it];
+
+                if (value) {
+                    if (value.parentPath && value.parentPath.indexOf(parent) !== -1) {
+                        result.push(value);
+                    }
+                }
+
+            });
+        }
+        return result;
     }
 
     getSectionRoots(): string[] {

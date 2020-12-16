@@ -13,6 +13,7 @@ export interface SectionInfo {
     count: number,
     id: string,
     name: string,
+    parentPath?: string[],
     connectionCount: number
 }
 export interface Child {

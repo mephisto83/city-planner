@@ -71,6 +71,9 @@ class Diagram:
         self.edges = edges
         self.vertices = vertices
         self.id = id
+        self.relative = None
+    def setRelative(self, relative):
+        self.relative = relative
 class Cell:
     def __init__(self, site, halfedges, closeMe):
         self.site = site
@@ -102,6 +105,11 @@ class HalfEdge:
         self.site = site
         self.edge = edge
         self.angle = angle
+        self.start = None
+        self.end = None
+    def setStartAndEnd(self, start, end):
+        self.start = Voronoi.buildVertex(start)
+        self.end = Voronoi.buildVertex(end)
 class Vertex:
     def __init__(self, x, y):
         self.x = x 
@@ -217,6 +225,8 @@ class Voronoi:
     @staticmethod
     def decodeObj(obj):
         v_ = obj["v"]
+        relative = v_["relative"]
+        relative = Voronoi.buildVertex(relative)
         diagram_ = v_["diagram"]
         cells_ = diagram_["cells"]
         edges_ = diagram_["edges"]
@@ -236,7 +246,9 @@ class Voronoi:
                 half_edge_ = halfedge_["edge"]
                 half_site = Voronoi.buildSite(half_site_)
                 half_edge = Voronoi.buildEdge(half_edge_)
-                halfedges.append(HalfEdge(half_site, half_edge, halfedge_["angle"]))
+                new_half_edge = HalfEdge(half_site, half_edge, halfedge_["angle"])
+                new_half_edge.setStartAndEnd(halfedge_["startPoint"], halfedge_["endPoint"])
+                halfedges.append(new_half_edge)
             cells.append(Cell(site, halfedges, cell_["closeMe"]))
         for i in range(len(edges_)):
             edge_ = edges_[i]
@@ -247,6 +259,7 @@ class Voronoi:
             vertex = Voronoi.buildVertex(vertex_)
             vertices.append(vertex)
         diagram = Diagram(cells, edges, vertices, v_["id"])
+        diagram.setRelative(relative)
         return diagram, v_["id"]
     @staticmethod
     def readFile(f):
@@ -260,7 +273,7 @@ class Voronoi:
 
 class Blend:
     @staticmethod
-    def buildCell(cell, node):
+    def buildCell(cell, node, diagram):
         halfedges = cell.halfedges
         vertices = []
         edges = []
@@ -268,17 +281,17 @@ class Blend:
         face = []
         point = 0
         id = cell.site.id
-        vertex = node.vertex
-        scale = .01
+        vertex = diagram.relative
+        scale = 1
         print("build cell")
         for i in range(len(halfedges)):
             half_edge = halfedges[i]
             edge = half_edge.edge
-            vb = edge.vb
+            vb = half_edge.end
             face.append(point)
             point = point + 1
             if len(vertices) == 0:
-                va = edge.va
+                va = half_edge.start
                 vertices.append((scale * (va.x + vertex.x), scale * (va.y + vertex.y), 0))
                 vertices.append((scale * (vb.x + vertex.x), scale * (vb.y + vertex.y), 0))
                 edges.append((0, 1))
@@ -315,8 +328,8 @@ class Blend:
                         break
                 if cell != None:
                     count = count + 1
-                    Blend.buildCell(cell, node)
-                    if count > 10:
+                    Blend.buildCell(cell, node, diagram)
+                    if count > 100:
                         break
 
     @staticmethod
