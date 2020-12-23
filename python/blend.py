@@ -10,7 +10,239 @@ bl_info = {
 import json
 import bpy
 import sys
+class ExtrudeObjectOutput:
+    def __init__(self, faces, existing_faces, new_face_indices):
+        self.topFace = faces[0].index
+        self.new_faces = new_face_indices
+        self.existing_faces = existing_faces
+class LoopCutOutput:
+    def __init__(self, existing_faces, new_face_indices):
+        self.new_faces = new_face_indices
+        self.existing_faces = existing_faces
+class BuildingTools:
+    @staticmethod
+    def extrudeObject(new_object, height, faceIndex):
+        bm = bmesh.new() 
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        scene = bpy.context.scene
+        bm.from_object(new_object, depsgraph)
+        # Get geometry to extrude 
+        bm.faces.ensure_lookup_table() 
+        bm.normal_update()
+        existing_faces = [face.index for face in bm.faces]
+        print("existing_faces")
+        print(existing_faces)
+        _face = bm.faces[faceIndex]
+        print(_face.normal)
+        faces = [bm.faces[faceIndex]] 
+        # Extrude 
+        extruded = bmesh.ops.extrude_face_region(bm, geom=faces)
+        # Move extruded geometry 
+        translate_verts = [v for v in extruded['geom'] if isinstance(v, BMVert)] 
+        bmesh.ops.translate(bm, vec=_face.normal*height, verts=translate_verts)
+        # Delete original faces 
+        bmesh.ops.delete(bm, geom=faces, context='FACES') 
+        # Remove doubles 
+        bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=0.001) 
+        # Update mesh and free Bmesh 
+        bm.faces.ensure_lookup_table() 
+        bm.normal_update() 
+        print("_face index = ")
+        updated_faces = [v for v in extruded['geom'] if isinstance(v, BMFace)]
+        print(updated_faces)
+        bm.faces.ensure_lookup_table() 
+        new_face_indices = [face.index for face in bm.faces if face.index > len(existing_faces)-1]
+        res = ExtrudeObjectOutput(updated_faces, existing_faces,new_face_indices)
+        existing_faces = [face.index for face in bm.faces]
+        print("existing_faces")
+        print(existing_faces)
+        print("result of extruded faces")
+        print(bm.faces)
+        print(len(bm.faces))
+        bm.to_mesh(new_object.data) 
+        bm.free()
+        return res 
+    @staticmethod
+    def scaleFaceInline(face, verts, scale_factor):
+        if isinstance(face, bmesh.types.BMFace):
+            c = face.calc_center_median()
+            for v in verts:
+                v.co = c + scale_factor * (v.co - c)
+    @staticmethod
+    def extrudeScale(new_object, scale, faceIndex, d):
+        bm = bmesh.new()
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        scene = bpy.context.scene
+        bm.from_object(new_object, depsgraph)
+        # Get geometry to extrude 
+        bm.faces.ensure_lookup_table() 
+        bm.normal_update()
+        existing_faces = [face.index for face in bm.faces]
+        _face = bm.faces[faceIndex]
+        print(_face.normal)
+        faces = [bm.faces[faceIndex]] 
+        v_cog = BuildingTools.getCOG(bm.faces[faceIndex].verts)
+        # Extrude 
+        extruded = bmesh.ops.extrude_face_region(bm, geom=faces)
+        print(extruded)
+        # Move extruded geometry 
+        translate_verts = [v for v in extruded['geom'] if isinstance(v, BMVert)] 
+        print("bm.faces: " + str(len(bm.faces)))
+        # f = bm.faces[faceIndex]
+        BuildingTools.scaleFaceInline(_face, translate_verts, scale)
+        #bmesh.ops.scale(bm, vec=scale, verts=translate_verts)
+        # Delete original faces 
+        bmesh.ops.delete(bm, geom=faces, context='FACES') 
+        bm.faces.ensure_lookup_table() 
+        bm.normal_update()
+        print("d " + str(d))
+        print("scale")
+        print(scale)
+        for i in range(len(translate_verts)):
+            vert = translate_verts[i]
+            print(vert)
+            print(vert.co)
+        # Remove doubles 
+        # bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=0.001) 
+        # Update mesh and free Bmesh 
+        bm.normal_update() 
+        bm.faces.ensure_lookup_table() 
+        
+        print("translated verts")
+        print(BuildingTools.getCOG(translate_verts))
+        updated_faces = [v for v in extruded['geom'] if isinstance(v, BMFace)]
+        new_face_indices = [face.index for face in bm.faces if face.index > len(existing_faces)-1]
+        res = ExtrudeObjectOutput(updated_faces, existing_faces,new_face_indices)
+        bm.to_mesh(new_object.data) 
+        bm.free()
+        return res
+    @staticmethod
+    def scaleTo(new_object, sidewalk, faceIndex):
+        mesh = new_object.data
+        bm = bmesh.new() 
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        scene = bpy.context.scene
+        bm.from_object(new_object, depsgraph)
+        # Get geometry to extrude 
+        bm.faces.ensure_lookup_table() 
+        bm.normal_update()
+        
+        lammy_x = lambda x : x.co[0]
+        lammy_y = lambda x : x.co[1]
+        print("scaling to is " )
+        print(bm.faces[faceIndex].index)
+        verts = bm.faces[faceIndex].verts
+        print("scale to verts")
+        num_min_x, num_max_x = BuildingTools._getCOG(verts, lammy_x)    
+        num_min_y, num_max_y = BuildingTools._getCOG(verts, lammy_y)
+        print("num_min_x: " + str(num_min_x)+", num_max_x: " +  str(num_max_x))
+        print("num_min_y: " + str(num_min_y)+", num_max_y: " +  str(num_max_y))
+        width = num_max_x - num_min_x
+        height = num_max_y - num_min_y
+        x = BuildingTools.scaling(width, sidewalk)
+        y = BuildingTools.scaling(height, sidewalk)
+        print("x " + str(x) + " y " + str(y))
+        bm.free()
+        return BuildingTools.extrudeScale(new_object, Vector((x,y,0)), faceIndex, sidewalk)
 
+    @staticmethod
+    def scaling(x , d):
+        return (((d * 2) / x) - 1) / -1
+    @staticmethod
+    def loopcut(new_object, faceIndex, cuts, vertical=False):
+        bm = bmesh.new()
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        scene = bpy.context.scene
+        bm.from_object(new_object, depsgraph)
+        # Get geometry to extrude 
+        bm.faces.ensure_lookup_table() 
+        bm.edges.ensure_lookup_table() 
+        bm.normal_update()
+        existing_faces = [face.index for face in bm.faces]
+        face = bm.faces[faceIndex]
+        if vertical:
+            edges = [face.edges[0], face.edges[2]]
+        else:
+            edges = [face.edges[1], face.edges[3]]
+        print(edges)
+        use_cap_endpoint = False
+        res = bmesh.ops.subdivide_edges(bm, edges=edges, cuts=cuts)
+        bm.faces.ensure_lookup_table() 
+        bm.edges.ensure_lookup_table()
+        # print(res)
+        new_face_indices = [face.index for face in bm.faces if face.index > len(existing_faces)-1]
+        res = LoopCutOutput(existing_faces, new_face_indices)
+        bm.normal_update()
+        bm.to_mesh(new_object.data) 
+        bm.free()
+        return res
+    @staticmethod
+    def getEdgesWithVertsAndNotInFace(edges, face):
+        f_edges = face.edges
+        res = []
+        print("f_edges")
+        print(f_edges)
+        
+        for i in range(len(edges)):
+            _e = edges[i]
+            for f_e_i in range(len(f_edges)):
+                f_e = f_edges[f_e_i]
+                if f_e != _e:
+                    if f_e.verts[0] == _e.verts[0] and f_e.verts[1] != _e.verts[1]:
+                        res.append(_e)
+                    elif f_e.verts[1] == _e.verts[1] and f_e.verts[0] != _e.verts[0]:
+                        res.append(_e)
+        return res
+    @staticmethod
+    def loopcutAround(new_object, faceIndex, cuts, vertical=False):
+        bm = bmesh.new()
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        scene = bpy.context.scene
+        bm.from_object(new_object, depsgraph)
+        # Get geometry to extrude 
+        bm.faces.ensure_lookup_table() 
+        bm.edges.ensure_lookup_table() 
+        bm.normal_update()
+        existing_faces = [face.index for face in bm.faces]
+        face = bm.faces[faceIndex]
+        edges = BuildingTools.getEdgesWithVertsAndNotInFace(bm.edges, face)
+        print(edges)
+        use_cap_endpoint = False
+        res = bmesh.ops.subdivide_edges(bm, edges=edges, cuts=cuts)
+        bm.faces.ensure_lookup_table() 
+        bm.edges.ensure_lookup_table()
+        # print(res)
+        new_face_indices = [face.index for face in bm.faces if face.index > len(existing_faces)-1]
+        res = LoopCutOutput(existing_faces, new_face_indices)
+        bm.normal_update()
+        bm.to_mesh(new_object.data) 
+        bm.free()
+        return res 
+    @staticmethod   
+    def getCOG(o):
+        lammy_x = lambda x : x.co[0]
+        lammy_y = lambda x : x.co[1]
+        lammy_z = lambda x : x.co[2]
+        num_min_x, num_max_x = BuildingTools._getCOG(o, lammy_x)
+        num_min_y, num_max_y = BuildingTools._getCOG(o, lammy_y)
+        num_min_z, num_max_z = BuildingTools._getCOG(o, lammy_z)
+        return Vector(((num_max_x - num_min_x) / 2, (num_max_y - num_min_y) / 2, (num_max_z - num_min_z) / 2))
+    @staticmethod
+    def _getCOG(vertices, lamb):
+        num_min = None
+        num_max = None
+        for i in range(len(vertices)):
+            vertex = vertices[i]
+            v = lamb(vertex)
+            if num_min == None:
+                num_min = v
+                num_max = v
+            else:
+                if num_min > v:
+                    num_min = v
+                if num_max < v:
+                    num_max = v
+        return num_min, num_max
 
 class CityPlannerGUI(bpy.types.Panel):
     """Presentation GUI"""
@@ -311,6 +543,7 @@ class Blend:
         bpy.context.scene.collection.children.link(new_collection)
         # add object to scene collection
         new_collection.objects.link(new_object)
+        bmesh.ops.extrude_discrete_faces(new_mesh, faces, use_normal_flip, use_select_history)
     @staticmethod 
     def buildCity(voronois, nodes):
         # make mesh
@@ -329,7 +562,7 @@ class Blend:
                 if cell != None:
                     count = count + 1
                     Blend.buildCell(cell, node, diagram)
-                    if count > 100:
+                    if count > 10:
                         break
 
     @staticmethod
